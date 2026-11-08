@@ -13,14 +13,19 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Build APK from web assets
-        uses: ni554n/apk-builder-action@v2
-        with:
-          app-name: "Messages"
-          web-assets-path: "."
-          output-path: "apk"
+      - name: Prepare web assets
+        run: |
+          mkdir -p dist
+          cp index.html style.css script.js dist/
 
-      - name: Upload APK
+      - name: Convert web assets to APK
+        uses: darkshredder/web-to-app-action@main  # Use @main, not @v2
+        with:
+          build-folder-path: "dist"
+          app-name: "Messages"
+          output-folder-path: "apk"
+
+      - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: Messages-APK
