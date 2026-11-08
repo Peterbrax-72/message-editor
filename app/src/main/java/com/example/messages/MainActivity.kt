@@ -1,12 +1,15 @@
 package com.example.messages
 
+import android.Manifest
 import android.app.role.RoleManager
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.provider.Telephony
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
@@ -43,6 +46,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.messages.data.Message
 import com.example.messages.theme.MessagesTheme
 import com.example.messages.ui.MessageViewModel
+import com.example.messages.ui.ScheduleScreen
+import com.example.messages.ui.ScheduleViewModel
 import com.example.messages.ui.SyncUi
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -50,6 +55,10 @@ import java.util.Locale
 
 class MainActivity : ComponentActivity() {
     private val vm: MessageViewModel by viewModels()
+    private val svm: ScheduleViewModel by viewModels()
+
+    private val notificationPermissionLauncher =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
 
     private val defaultSmsLauncher =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
@@ -58,18 +67,38 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+
         setContent {
             MessagesTheme {
                 val sync by vm.sync.collectAsStateWithLifecycle()
-                AppScreen(
-                    vm = vm,
-                    sync = sync,
-                    onRequestDefault = { requestDefaultSms() },
-                    onOpenDefaultAppSettings = {
-                        vm.dismissSync()
-                        startActivity(Intent(Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS))
-                    }
-                )
+                var showSchedule by remember { mutableStateOf(false) }
+
+                if (showSchedule) {
+                    BackHandler { showSchedule = false }
+                    ScheduleScreen(
+                        svm = svm,
+                        onBack = { showSchedule = false },
+                        onRequestDefault = { requestDefaultSms() }
+                    )
+                } else {
+                    AppScreen(
+                        vm = vm,
+                        sync = sync,
+                        onRequestDefault = { requestDefaultSms() },
+                        onOpenDefaultAppSettings = {
+                            vm.dismissSync()
+                            startActivity(Intent(Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS))
+                        },
+                        onOpenSchedule = { showSchedule = true }
+                    )
+                }
             }
         }
     }
@@ -77,6 +106,7 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         vm.onResume()
+        svm.refresh()
     }
 
     private fun requestDefaultSms() {
@@ -98,7 +128,8 @@ fun AppScreen(
     vm: MessageViewModel,
     sync: SyncUi,
     onRequestDefault: () -> Unit,
-    onOpenDefaultAppSettings: () -> Unit
+    onOpenDefaultAppSettings: () -> Unit,
+    onOpenSchedule: () -> Unit
 ) {
     var showEditor by remember { mutableStateOf(false) }
     var editing by remember { mutableStateOf<Message?>(null) }
@@ -146,6 +177,7 @@ fun AppScreen(
                 title = { Text("Messages") },
                 actions = {
                     if (!showEditor) {
+                        TextButton(onClick = onOpenSchedule) { Text("Schedule") }
                         TextButton(onClick = { editing = null; showEditor = true }) {
                             Text("New")
                         }

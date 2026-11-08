@@ -60,6 +60,28 @@ object SmsSync {
         null
     }
 
+    /** Most recent distinct numbers from existing conversations, newest first. */
+    fun recentAddresses(ctx: Context, limit: Int = 15): List<String> = try {
+        val out = LinkedHashSet<String>()
+        ctx.contentResolver.query(
+            Telephony.Sms.CONTENT_URI,
+            arrayOf(Telephony.Sms.ADDRESS),
+            null,
+            null,
+            "${Telephony.Sms.DATE} DESC"
+        )?.use { c ->
+            val col = c.getColumnIndex(Telephony.Sms.ADDRESS)
+            var scanned = 0
+            while (col >= 0 && c.moveToNext() && out.size < limit && scanned < 3000) {
+                c.getString(col)?.takeIf { it.isNotBlank() }?.let { out.add(it) }
+                scanned++
+            }
+        }
+        out.toList()
+    } catch (_: Exception) {
+        emptyList()
+    }
+
     fun delete(ctx: Context, sysId: Long) {
         try {
             ctx.contentResolver.delete(
