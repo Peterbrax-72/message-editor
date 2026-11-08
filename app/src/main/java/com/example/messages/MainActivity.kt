@@ -46,6 +46,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.messages.data.Message
 import com.example.messages.theme.MessagesTheme
 import com.example.messages.ui.MessageViewModel
+import com.example.messages.ui.HistoryScreen
 import com.example.messages.ui.ScheduleScreen
 import com.example.messages.ui.ScheduleViewModel
 import com.example.messages.ui.SyncUi
@@ -79,8 +80,12 @@ class MainActivity : ComponentActivity() {
             MessagesTheme {
                 val sync by vm.sync.collectAsStateWithLifecycle()
                 var showSchedule by remember { mutableStateOf(false) }
+                var showHistory by remember { mutableStateOf(false) }
 
-                if (showSchedule) {
+                if (showHistory) {
+                    BackHandler { showHistory = false }
+                    HistoryScreen(vm = vm, onBack = { showHistory = false })
+                } else if (showSchedule) {
                     BackHandler { showSchedule = false }
                     ScheduleScreen(
                         svm = svm,
@@ -96,7 +101,8 @@ class MainActivity : ComponentActivity() {
                             vm.dismissSync()
                             startActivity(Intent(Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS))
                         },
-                        onOpenSchedule = { showSchedule = true }
+                        onOpenSchedule = { showSchedule = true },
+                        onOpenHistory = { showHistory = true }
                     )
                 }
             }
@@ -129,7 +135,8 @@ fun AppScreen(
     sync: SyncUi,
     onRequestDefault: () -> Unit,
     onOpenDefaultAppSettings: () -> Unit,
-    onOpenSchedule: () -> Unit
+    onOpenSchedule: () -> Unit,
+    onOpenHistory: () -> Unit
 ) {
     var showEditor by remember { mutableStateOf(false) }
     var editing by remember { mutableStateOf<Message?>(null) }
@@ -156,7 +163,8 @@ fun AppScreen(
             title = { Text("Messages added") },
             text = {
                 Text(
-                    "${sync.count} message(s) were written to the phone. Now switch back to " +
+                    "${sync.count} message(s) were written to the phone's SMS storage and " +
+                        "checked there. Now switch back to " +
                         "${sync.previousApp ?: "your messaging app"} so they appear there. " +
                         "While Messages stays the default, new incoming texts will not show " +
                         "notifications."
@@ -177,6 +185,7 @@ fun AppScreen(
                 title = { Text("Messages") },
                 actions = {
                     if (!showEditor) {
+                        TextButton(onClick = onOpenHistory) { Text("History") }
                         TextButton(onClick = onOpenSchedule) { Text("Schedule") }
                         TextButton(onClick = { editing = null; showEditor = true }) {
                             Text("New")
@@ -241,6 +250,13 @@ fun MessageCard(message: Message, onEdit: () -> Unit, onDelete: () -> Unit) {
             }
             Spacer(Modifier.height(4.dp))
             Text(message.body, style = MaterialTheme.typography.bodyMedium)
+            if (message.synced) {
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    "✓ Saved in the phone's message storage",
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
             Spacer(Modifier.height(8.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(onClick = onEdit) { Text("Edit") }

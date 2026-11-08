@@ -8,6 +8,7 @@ import androidx.lifecycle.viewModelScope
 import com.example.messages.data.AppDatabase
 import com.example.messages.data.Message
 import com.example.messages.data.SmsSync
+import com.example.messages.data.SystemSms
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
@@ -85,6 +86,28 @@ class MessageViewModel(app: Application) : AndroidViewModel(app) {
     /** Called from onResume: if we are default and something is waiting, write it. */
     fun onResume() = viewModelScope.launch {
         if (SmsSync.isDefault(ctx) && dao.getUnsynced().isNotEmpty()) syncPending()
+    }
+
+    private val _history = MutableStateFlow<List<SystemSms>>(emptyList())
+    val history: StateFlow<List<SystemSms>> = _history
+
+    /** Row ids in the phone's SMS store that this app wrote. */
+    private val _mine = MutableStateFlow<Set<Long>>(emptySet())
+    val mine: StateFlow<Set<Long>> = _mine
+
+    private val _canReadHistory = MutableStateFlow(false)
+    val canReadHistory: StateFlow<Boolean> = _canReadHistory
+
+    /** Reads the phone's real SMS storage (possible only while this is the default SMS app). */
+    fun loadHistory() = viewModelScope.launch {
+        val can = SmsSync.isDefault(ctx)
+        _canReadHistory.value = can
+        if (!can) {
+            _history.value = emptyList()
+            return@launch
+        }
+        _mine.value = dao.sysIds().toSet()
+        _history.value = withContext(Dispatchers.IO) { SmsSync.readHistory(ctx) }
     }
 
     fun dismissSync() { _sync.value = SyncUi.Idle }

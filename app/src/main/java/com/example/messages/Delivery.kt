@@ -1,8 +1,6 @@
 package com.example.messages
 
-import android.content.ContentValues
 import android.content.Context
-import android.provider.Telephony
 import com.example.messages.data.AppDatabase
 import com.example.messages.data.Message
 import com.example.messages.data.SmsSync
@@ -16,7 +14,7 @@ object Delivery {
     /**
      * Writes the text as an unread incoming message dated [millis] (past or future),
      * mirrors it in the app's own list and shows a notification.
-     * Returns false if Messages is not the default SMS app or the write failed.
+     * Returns false if Messages is not the default SMS app or the write could not be verified.
      */
     suspend fun deliver(
         ctx: Context,
@@ -26,7 +24,7 @@ object Delivery {
         notificationId: Int
     ): Boolean {
         if (!SmsSync.isDefault(ctx)) return false
-        val sysId = insertIncoming(ctx, recipient, body, millis) ?: return false
+        val sysId = SmsSync.insertIncoming(ctx, recipient, body, millis) ?: return false
 
         val date = Date(millis)
         AppDatabase.get(ctx).messageDao().insert(
@@ -44,25 +42,4 @@ object Delivery {
         Notifier.show(ctx, recipient, body, notificationId)
         return true
     }
-
-    private fun insertIncoming(ctx: Context, address: String, body: String, millis: Long): Long? =
-        try {
-            val values = ContentValues().apply {
-                put(Telephony.Sms.ADDRESS, address)
-                put(Telephony.Sms.BODY, body)
-                put(Telephony.Sms.DATE, millis)
-                put(Telephony.Sms.DATE_SENT, millis)
-                put(Telephony.Sms.READ, 0)
-                put(Telephony.Sms.SEEN, 0)
-                // Use the thread that already exists for this number so the text joins it.
-                try {
-                    put(Telephony.Sms.THREAD_ID, Telephony.Threads.getOrCreateThreadId(ctx, address))
-                } catch (_: Exception) {
-                }
-            }
-            ctx.contentResolver.insert(Telephony.Sms.Inbox.CONTENT_URI, values)
-                ?.lastPathSegment?.toLongOrNull()
-        } catch (_: Exception) {
-            null
-        }
 }
