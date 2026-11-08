@@ -1,8 +1,14 @@
 package com.example.messages
 
+import android.app.role.RoleManager
+import android.content.Intent
+import android.os.Build
 import android.os.Bundle
+import android.provider.Settings
+import android.provider.Telephony
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -14,6 +20,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -36,6 +43,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.messages.data.Message
 import com.example.messages.theme.MessagesTheme
 import com.example.messages.ui.MessageViewModel
+import com.example.messages.ui.SyncUi
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -43,23 +51,94 @@ import java.util.Locale
 class MainActivity : ComponentActivity() {
     private val vm: MessageViewModel by viewModels()
 
+    private val defaultSmsLauncher =
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+            vm.onDefaultResult()
+        }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
             MessagesTheme {
-                AppScreen(vm)
+                val sync by vm.sync.collectAsStateWithLifecycle()
+                AppScreen(
+                    vm = vm,
+                    sync = sync,
+                    onRequestDefault = { requestDefaultSms() },
+                    onOpenDefaultAppSettings = {
+                        vm.dismissSync()
+                        startActivity(Intent(Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS))
+                    }
+                )
             }
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        vm.onResume()
+    }
+
+    private fun requestDefaultSms() {
+        vm.rememberPreviousDefault()
+        val intent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            getSystemService(RoleManager::class.java)
+                .createRequestRoleIntent(RoleManager.ROLE_SMS)
+        } else {
+            Intent(Telephony.Sms.Intents.ACTION_CHANGE_DEFAULT)
+                .putExtra(Telephony.Sms.Intents.EXTRA_PACKAGE_NAME, packageName)
+        }
+        defaultSmsLauncher.launch(intent)
     }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun AppScreen(vm: MessageViewModel) {
+fun AppScreen(
+    vm: MessageViewModel,
+    sync: SyncUi,
+    onRequestDefault: () -> Unit,
+    onOpenDefaultAppSettings: () -> Unit
+) {
     var showEditor by remember { mutableStateOf(false) }
     var editing by remember { mutableStateOf<Message?>(null) }
     val folder by vm.folder.collectAsStateWithLifecycle()
     val messages by vm.messages.collectAsStateWithLifecycle(initialValue = emptyList())
+
+    when (sync) {
+        is SyncUi.NeedDefault -> AlertDialog(
+            onDismissRequest = { vm.dismissSync() },
+            title = { Text("Add to your messaging app?") },
+            text = {
+                Text(
+                    "Android only lets the default SMS app write to the phone's message store. " +
+                        "Make Messages the default for a moment so your ${sync.pending} new " +
+                        "message(s) are added, then switch back to your usual app."
+                )
+            },
+            confirmButton = { TextButton(onClick = onRequestDefault) { Text("Continue") } },
+            dismissButton = { TextButton(onClick = { vm.dismissSync() }) { Text("Not now") } }
+        )
+
+        is SyncUi.Done -> AlertDialog(
+            onDismissRequest = { vm.dismissSync() },
+            title = { Text("Messages added") },
+            text = {
+                Text(
+                    "${sync.count} message(s) were written to the phone. Now switch back to " +
+                        "${sync.previousApp ?: "your messaging app"} so they appear there. " +
+                        "While Messages stays the default, new incoming texts will not show " +
+                        "notifications."
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = onOpenDefaultAppSettings) { Text("Open default apps") }
+            },
+            dismissButton = { TextButton(onClick = { vm.dismissSync() }) { Text("Close") } }
+        )
+
+        SyncUi.Idle -> Unit
+    }
 
     Scaffold(
         topBar = {
@@ -141,8 +220,8 @@ fun MessageCard(message: Message, onEdit: () -> Unit, onDelete: () -> Unit) {
 
 @Composable
 fun EditorScreen(existing: Message?, onSave: (Message) -> Unit, onCancel: () -> Unit) {
-    val dateFmt = remember { SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()) }
-    val timeFmt = remember { SimpleDateFormat("HH:mm", Locale.getDefault()) }
+    val dateFmt = remember { SimpleDateFormat("yyyy-MM-dd", Locale.US) }
+    val timeFmt = remember { SimpleDateFormat("HH:mm", Locale.US) }
 
     var recipient by remember { mutableStateOf(existing?.recipient ?: "") }
     var body by remember { mutableStateOf(existing?.body ?: "") }
@@ -157,7 +236,7 @@ fun EditorScreen(existing: Message?, onSave: (Message) -> Unit, onCancel: () -> 
         OutlinedTextField(
             value = recipient,
             onValueChange = { recipient = it },
-            label = { Text("To (name or phone)") },
+            label = { Text("Phone number") },
             modifier = Modifier.fillMaxWidth()
         )
         OutlinedTextField(
@@ -170,13 +249,13 @@ fun EditorScreen(existing: Message?, onSave: (Message) -> Unit, onCancel: () -> 
             OutlinedTextField(
                 value = date,
                 onValueChange = { date = it },
-                label = { Text("Date") },
+                label = { Text("Date (yyyy-MM-dd)") },
                 modifier = Modifier.weight(1f)
             )
             OutlinedTextField(
                 value = time,
                 onValueChange = { time = it },
-                label = { Text("Time") },
+                label = { Text("Time (HH:mm)") },
                 modifier = Modifier.weight(1f)
             )
         }
@@ -200,7 +279,8 @@ fun EditorScreen(existing: Message?, onSave: (Message) -> Unit, onCancel: () -> 
                                 body = body.trim(),
                                 date = date,
                                 time = time,
-                                folder = folder
+                                folder = folder,
+                                createdAt = existing?.createdAt ?: System.currentTimeMillis()
                             )
                         )
                     }

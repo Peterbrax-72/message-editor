@@ -24,4 +24,10 @@ interface MessageDao {
 
     @Query("SELECT * FROM messages WHERE id = :id")
     suspend fun getById(id: Long): Message?
+
+    @Query("SELECT * FROM messages WHERE synced = 0")
+    suspend fun getUnsynced(): List<Message>
+
+    @Query("UPDATE messages SET synced = 1, sysId = :sysId WHERE id = :id")
+    suspend fun markSynced(id: Long, sysId: Long)
 }
